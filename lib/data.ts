@@ -95,8 +95,9 @@ function extractTVLHistory(llamaData: LlamaProtocolResponse | null): { date: num
 
   if (llamaData.chainTvls) {
     for (const chain of Object.keys(llamaData.chainTvls)) {
-      // Skip special aggregate keys
-      if (chain.includes('-') && !['bsc', 'avalanche'].some(c => chain.toLowerCase().includes(c))) continue
+      // Skip DefiLlama aggregate/derived keys (e.g. "Ethereum-staking", "borrowed", "pool2")
+      const lc = chain.toLowerCase()
+      if (lc === 'borrowed' || lc === 'pool2' || lc === 'staking' || lc.includes('-')) continue
       const chainData = llamaData.chainTvls[chain]
       if (chainData?.tvl) {
         for (const point of chainData.tvl) {
@@ -185,9 +186,9 @@ export async function getProtocolData(config: ProtocolConfig): Promise<{
       ? (annualizedFees / tvl) * 100
       : null
 
-  // Momentum metrics
+  // Momentum metrics — compound 30d change to approximate 90d
   const priceChange90d = geckoMarket?.market_data?.price_change_percentage_30d != null
-    ? geckoMarket.market_data.price_change_percentage_30d * 3  // approximate 90d
+    ? ((Math.pow(1 + geckoMarket.market_data.price_change_percentage_30d / 100, 3) - 1) * 100)
     : null
   const tvlChange90d = computeTvlChange90d(extractTVLHistory(llamaProtocol))
   const revenueChange90d = computeRevenueChange90d(llamaRevenue)

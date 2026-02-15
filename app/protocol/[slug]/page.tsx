@@ -36,16 +36,16 @@ export default async function ProtocolPage({ params }: PageProps) {
 
   // Compute ratings across all protocols for quintile ranking
   // We need all protocols' raw scores to assign quintile ranks
-  const allRawScores = await Promise.all(
+  const allRawScores = (await Promise.allSettled(
     PROTOCOLS.map(async (p) => {
-      try {
-        const data = await getProtocolData(p)
-        return computeRawScores(p.slug, data.metrics)
-      } catch {
-        return computeRawScores(p.slug, metrics) // fallback
-      }
+      const data = await getProtocolData(p)
+      return computeRawScores(p.slug, data.metrics)
     })
-  )
+  ))
+    .filter((r): r is PromiseFulfilledResult<ReturnType<typeof computeRawScores>> =>
+      r.status === 'fulfilled'
+    )
+    .map((r) => r.value)
 
   const ratingsMap = assignQuintileRatings(allRawScores)
   const ratings = ratingsMap.get(config.slug) ?? null

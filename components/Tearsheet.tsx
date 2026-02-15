@@ -18,7 +18,7 @@ export default function Tearsheet({ data }: TearsheetProps) {
       <Header protocol={data.config} />
 
       {/* Top section: Chart + Ratings side by side */}
-      <div className="grid grid-cols-[1fr_180px]">
+      <div className="grid grid-cols-[1fr_180px] items-start">
         <PriceChart data={data.historicalPrices} ticker={data.config.ticker} />
         <RatingsBox ratings={data.ratings} />
       </div>

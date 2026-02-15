@@ -73,10 +73,14 @@ function buildScenario(
   const revenue1y = currentRevenue * (1 + growthRate)
   const revenue3y = currentRevenue * Math.pow(1 + growthRate, 3)
   const ps1y = currentPS * (1 + psChange)
-  const ps3y = currentPS * (1 + psChange)
+  const ps3y = currentPS * Math.pow(1 + psChange, 3)
 
-  const impliedPrice1y = (revenue1y * ps1y) / circulatingSupply
-  const impliedPrice3y = (revenue3y * ps3y) / circulatingSupply
+  let impliedPrice1y: number | null = (revenue1y * ps1y) / circulatingSupply
+  let impliedPrice3y: number | null = (revenue3y * ps3y) / circulatingSupply
+
+  // Guard against non-finite results from extreme inputs
+  if (!isFinite(impliedPrice1y)) impliedPrice1y = null
+  if (!isFinite(impliedPrice3y)) impliedPrice3y = null
 
   return {
     label,
