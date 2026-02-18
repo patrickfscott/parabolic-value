@@ -9,15 +9,20 @@ import {
   DefiLlamaRevenue,
 } from './types'
 
-const DEFILLAMA_BASE = 'https://pro-api.llama.fi'
+const DEFILLAMA_PRO_BASE = 'https://pro-api.llama.fi'
+const DEFILLAMA_FREE_BASE = 'https://api.llama.fi'
 const COINGECKO_BASE = 'https://pro-api.coingecko.com/api/v3'
 
 const REVALIDATE = 86400 // 24 hours
 
 function llamaUrl(path: string): string {
-  const key = process.env.DEFILLAMA_API_KEY || ''
-  const sep = path.includes('?') ? '&' : '?'
-  return `${DEFILLAMA_BASE}${path}${sep}apikey=${key}`
+  const key = process.env.DEFILLAMA_API_KEY
+  if (key) {
+    // Pro API: key is a path segment between base URL and endpoint
+    return `${DEFILLAMA_PRO_BASE}/${key}${path}`
+  }
+  // Fallback to free API when no Pro key is configured
+  return `${DEFILLAMA_FREE_BASE}${path}`
 }
 
 function geckoUrl(path: string): string {
