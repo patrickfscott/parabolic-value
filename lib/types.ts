@@ -35,9 +35,8 @@ export interface DefiLlamaFees {
   total48hto24h: number | null
   total7d: number | null
   total30d: number | null
-  total1y: number | null
   totalAllTime: number | null
-  totalDataChart?: [number, number][]
+  totalDataChart: [number, number][]
   totalDataChartBreakdown?: Record<string, [number, number][]>
 }
 
@@ -46,9 +45,8 @@ export interface DefiLlamaRevenue {
   total48hto24h: number | null
   total7d: number | null
   total30d: number | null
-  total1y: number | null
   totalAllTime: number | null
-  totalDataChart?: [number, number][]
+  totalDataChart: [number, number][]
 }
 
 export interface DefiLlamaTreasury {

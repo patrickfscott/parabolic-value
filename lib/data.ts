@@ -11,26 +11,24 @@ import {
 
 const DEFILLAMA_PRO_BASE = 'https://pro-api.llama.fi'
 const DEFILLAMA_FREE_BASE = 'https://api.llama.fi'
-const DEFILLAMA_FREE_FEES_BASE = 'https://fees.llama.fi'
 const COINGECKO_BASE = 'https://pro-api.coingecko.com/api/v3'
 
 const REVALIDATE = 86400 // 24 hours
 
 /**
- * Build a DefiLlama URL.  The Pro API unifies every endpoint under one host,
- * but the free API splits them across sub-domains:
- *   - api.llama.fi      → TVL, protocol, treasury
- *   - fees.llama.fi     → /summary/fees (fees & revenue)
+ * Build a DefiLlama URL.
+ *
+ * Pro API format (per official @defillama/api SDK):
+ *   https://pro-api.llama.fi/{KEY}/api{endpoint}
+ *
+ * Free API:
+ *   https://api.llama.fi{endpoint}
  */
 function llamaUrl(path: string): string {
   const key = process.env.DEFILLAMA_API_KEY
   if (key) {
-    // Pro API: key is a path segment between base URL and endpoint
-    return `${DEFILLAMA_PRO_BASE}/${key}${path}`
-  }
-  // Free API: route fees/revenue to the fees sub-domain
-  if (path.startsWith('/summary/fees')) {
-    return `${DEFILLAMA_FREE_FEES_BASE}${path}`
+    // Pro API: key is a path segment, followed by /api namespace, then endpoint
+    return `${DEFILLAMA_PRO_BASE}/${key}/api${path}`
   }
   return `${DEFILLAMA_FREE_BASE}${path}`
 }
