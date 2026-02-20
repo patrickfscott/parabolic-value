@@ -18,11 +18,10 @@ export interface DefiLlamaProtocol {
   symbol: string
   category: string
   chains: string[]
-  tvl: number
-  chainTvls: Record<string, number>
+  // /protocol/{slug} returns tvl as a historical array; use currentChainTvls for current value
+  tvl: { date: number; totalLiquidityUSD: number }[]
+  chainTvls: Record<string, { tvl: { date: number; totalLiquidityUSD: number }[] }>
   currentChainTvls: Record<string, number>
-  tvlList?: { date: number; totalLiquidityUSD: number }[]
-  // Historical TVL is in the main response
 }
 
 export interface DefiLlamaHistoricalTVL {
