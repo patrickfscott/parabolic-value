@@ -67,11 +67,11 @@ interface LlamaProtocolResponse {
   name: string
   symbol: string
   category: string
-  tvl: number
+  // /protocol/{slug} returns tvl as a historical array, NOT a number.
+  // Use currentChainTvls for the current aggregate TVL.
+  tvl: { date: number; totalLiquidityUSD: number }[]
   chainTvls: Record<string, { tvl: { date: number; totalLiquidityUSD: number }[] }>
   currentChainTvls: Record<string, number>
-  tvl_list?: { date: number; totalLiquidityUSD: number }[]
-  // The main tvl history is directly on the object
 }
 
 export async function getDefiLlamaProtocol(slug: string) {
@@ -104,20 +104,37 @@ export async function getCoinGeckoMarketChart(geckoId: string) {
   )
 }
 
-// ── Historical TVL extraction ───────────────────────────────────────
+// ── TVL helpers ─────────────────────────────────────────────────────
+
+/** Chains / derived keys to exclude when summing TVL. */
+function isDerivedChainKey(chain: string): boolean {
+  const lc = chain.toLowerCase()
+  return lc === 'borrowed' || lc === 'pool2' || lc === 'staking' || lc.includes('-')
+}
+
+/**
+ * Compute current aggregate TVL from currentChainTvls, filtering out
+ * DefiLlama derived categories (borrowed, pool2, staking, chain-specific variants).
+ */
+function computeCurrentTVL(llamaData: LlamaProtocolResponse | null): number | null {
+  if (!llamaData?.currentChainTvls) return null
+  let total = 0
+  for (const [chain, value] of Object.entries(llamaData.currentChainTvls)) {
+    if (isDerivedChainKey(chain)) continue
+    total += value
+  }
+  return total > 0 ? total : null
+}
 
 function extractTVLHistory(llamaData: LlamaProtocolResponse | null): { date: number; tvl: number }[] {
   if (!llamaData) return []
 
-  // DefiLlama returns TVL history in chainTvls or as a direct tvl array
-  // Try to reconstruct aggregate from chainTvls
+  // Try to reconstruct aggregate from per-chain data (allows filtering derived keys)
   const tvlMap = new Map<number, number>()
 
   if (llamaData.chainTvls) {
     for (const chain of Object.keys(llamaData.chainTvls)) {
-      // Skip DefiLlama aggregate/derived keys (e.g. "Ethereum-staking", "borrowed", "pool2")
-      const lc = chain.toLowerCase()
-      if (lc === 'borrowed' || lc === 'pool2' || lc === 'staking' || lc.includes('-')) continue
+      if (isDerivedChainKey(chain)) continue
       const chainData = llamaData.chainTvls[chain]
       if (chainData?.tvl) {
         for (const point of chainData.tvl) {
@@ -125,6 +142,13 @@ function extractTVLHistory(llamaData: LlamaProtocolResponse | null): { date: num
           tvlMap.set(point.date, existing + point.totalLiquidityUSD)
         }
       }
+    }
+  }
+
+  // Fall back to top-level tvl array if chainTvls produced nothing
+  if (tvlMap.size === 0 && Array.isArray(llamaData.tvl)) {
+    for (const point of llamaData.tvl) {
+      tvlMap.set(point.date, point.totalLiquidityUSD)
     }
   }
 
@@ -172,7 +196,7 @@ export async function getProtocolData(config: ProtocolConfig): Promise<{
   const distanceFromATH =
     price != null && ath != null && ath > 0 ? ((price - ath) / ath) * 100 : null
 
-  const tvl = llamaProtocol?.tvl ?? null
+  const tvl = computeCurrentTVL(llamaProtocol)
 
   // Revenue & fees: annualize from 30d data
   const annualizedRevenue =
