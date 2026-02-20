@@ -11,17 +11,27 @@ import {
 
 const DEFILLAMA_PRO_BASE = 'https://pro-api.llama.fi'
 const DEFILLAMA_FREE_BASE = 'https://api.llama.fi'
+const DEFILLAMA_FREE_FEES_BASE = 'https://fees.llama.fi'
 const COINGECKO_BASE = 'https://pro-api.coingecko.com/api/v3'
 
 const REVALIDATE = 86400 // 24 hours
 
+/**
+ * Build a DefiLlama URL.  The Pro API unifies every endpoint under one host,
+ * but the free API splits them across sub-domains:
+ *   - api.llama.fi      → TVL, protocol, treasury
+ *   - fees.llama.fi     → /summary/fees (fees & revenue)
+ */
 function llamaUrl(path: string): string {
   const key = process.env.DEFILLAMA_API_KEY
   if (key) {
     // Pro API: key is a path segment between base URL and endpoint
     return `${DEFILLAMA_PRO_BASE}/${key}${path}`
   }
-  // Fallback to free API when no Pro key is configured
+  // Free API: route fees/revenue to the fees sub-domain
+  if (path.startsWith('/summary/fees')) {
+    return `${DEFILLAMA_FREE_FEES_BASE}${path}`
+  }
   return `${DEFILLAMA_FREE_BASE}${path}`
 }
 
@@ -31,16 +41,23 @@ function geckoUrl(path: string): string {
   return `${COINGECKO_BASE}${path}${sep}x_cg_pro_api_key=${key}`
 }
 
+/** Strip API keys from URLs before logging. */
+function redactUrl(url: string): string {
+  const key = process.env.DEFILLAMA_API_KEY
+  if (key) return url.replace(key, '[KEY]')
+  return url
+}
+
 async function safeFetch<T>(url: string): Promise<T | null> {
   try {
     const res = await fetch(url, { next: { revalidate: REVALIDATE } })
     if (!res.ok) {
-      console.error(`API error ${res.status} for ${url.split('?')[0]}`)
+      console.error(`API error ${res.status} for ${redactUrl(url)}`)
       return null
     }
     return (await res.json()) as T
   } catch (err) {
-    console.error(`Fetch error for ${url.split('?')[0]}:`, err)
+    console.error(`Fetch error for ${redactUrl(url)}:`, err)
     return null
   }
 }
