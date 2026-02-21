@@ -43,7 +43,13 @@ function geckoProUrl(path: string): string | null {
 }
 
 function geckoFreeUrl(path: string): string {
-  return `${COINGECKO_FREE_BASE}${path}`
+  const key = process.env.COINGECKO_API_KEY
+  const base = `${COINGECKO_FREE_BASE}${path}`
+  if (!key) return base
+  // Pass the key as a demo API key so the free-tier fallback is authenticated.
+  // This also handles the case where the key is a Demo key (not Pro).
+  const sep = path.includes('?') ? '&' : '?'
+  return `${base}${sep}x_cg_demo_api_key=${key}`
 }
 
 /** Strip API keys from URLs before logging. */
@@ -129,7 +135,10 @@ export async function getCoinGeckoMarketData(geckoId: string) {
 }
 
 export async function getCoinGeckoMarketChart(geckoId: string) {
-  const path = `/coins/${geckoId}/market_chart?vs_currency=usd&days=max&interval=daily`
+  // Do NOT pass interval=daily — it is a paid-plan-only parameter on CoinGecko
+  // and causes a 400 error on the free tier.  With days=max (>90 days) the API
+  // automatically returns daily-granularity data.
+  const path = `/coins/${geckoId}/market_chart?vs_currency=usd&days=max`
   return safeFetchWithFallback<CoinGeckoMarketChart>(geckoProUrl(path), geckoFreeUrl(path))
 }
 
