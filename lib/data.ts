@@ -129,7 +129,10 @@ export async function getCoinGeckoMarketData(geckoId: string) {
 }
 
 export async function getCoinGeckoMarketChart(geckoId: string) {
-  const path = `/coins/${geckoId}/market_chart?vs_currency=usd&days=max&interval=daily`
+  // Do NOT pass interval=daily — it is a paid-plan-only parameter on CoinGecko
+  // and causes a 400 error on the free tier.  With days=max (>90 days) the API
+  // automatically returns daily-granularity data.
+  const path = `/coins/${geckoId}/market_chart?vs_currency=usd&days=max`
   return safeFetchWithFallback<CoinGeckoMarketChart>(geckoProUrl(path), geckoFreeUrl(path))
 }
 
