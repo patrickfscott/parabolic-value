@@ -13,6 +13,7 @@ const DEFILLAMA_PRO_BASE = 'https://pro-api.llama.fi'
 const DEFILLAMA_FREE_BASE = 'https://api.llama.fi'
 const COINGECKO_PRO_BASE = 'https://pro-api.coingecko.com/api/v3'
 const COINGECKO_FREE_BASE = 'https://api.coingecko.com/api/v3'
+const DEFILLAMA_COINS_BASE = 'https://coins.llama.fi'
 
 const REVALIDATE = 86400 // 24 hours
 
@@ -95,6 +96,17 @@ async function safeFetchWithFallback<T>(
 
 // ── DefiLlama Fetchers ──────────────────────────────────────────────
 
+interface DefiLlamaCoinsChartResponse {
+  coins: Record<
+    string,
+    {
+      symbol: string
+      confidence: number
+      prices: { timestamp: number; price: number }[]
+    }
+  >
+}
+
 interface LlamaProtocolResponse {
   id: string
   name: string
@@ -140,6 +152,20 @@ export async function getCoinGeckoMarketChart(geckoId: string) {
   // automatically returns daily-granularity data.
   const path = `/coins/${geckoId}/market_chart?vs_currency=usd&days=max`
   return safeFetchWithFallback<CoinGeckoMarketChart>(geckoProUrl(path), geckoFreeUrl(path))
+}
+
+// ── DefiLlama Coins (Historical Price Fallback) ───────────────────
+
+async function getDefiLlamaHistoricalPrices(
+  geckoId: string,
+): Promise<[number, number][]> {
+  const url = `${DEFILLAMA_COINS_BASE}/chart/coingecko:${geckoId}`
+  const data = await safeFetch<DefiLlamaCoinsChartResponse>(url)
+  const coinKey = `coingecko:${geckoId}`
+  const prices = data?.coins?.[coinKey]?.prices
+  if (!prices || prices.length === 0) return []
+  // Convert to CoinGecko-compatible format: [timestamp_ms, price]
+  return prices.map((p) => [p.timestamp * 1000, p.price] as [number, number])
 }
 
 // ── TVL helpers ─────────────────────────────────────────────────────
@@ -306,7 +332,13 @@ export async function getProtocolData(config: ProtocolConfig): Promise<{
   // ── Historical Data Points ──────────────────────────────────────
 
   const tvlHistory = extractTVLHistory(llamaProtocol)
-  const priceHistory = geckoChart?.prices ?? []
+  let priceHistory: [number, number][] = geckoChart?.prices ?? []
+
+  // Fallback: if CoinGecko chart failed, try DefiLlama coins API for price history
+  if (priceHistory.length === 0) {
+    console.warn(`CoinGecko chart empty for ${config.geckoId}, trying DefiLlama coins API`)
+    priceHistory = await getDefiLlamaHistoricalPrices(config.geckoId)
+  }
 
   // Build merged timeline
   const historicalPrices = buildHistoricalTimeline(priceHistory, tvlHistory)
