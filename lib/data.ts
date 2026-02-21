@@ -11,12 +11,13 @@ import {
 
 const DEFILLAMA_PRO_BASE = 'https://pro-api.llama.fi'
 const DEFILLAMA_FREE_BASE = 'https://api.llama.fi'
-const COINGECKO_BASE = 'https://pro-api.coingecko.com/api/v3'
+const COINGECKO_PRO_BASE = 'https://pro-api.coingecko.com/api/v3'
+const COINGECKO_FREE_BASE = 'https://api.coingecko.com/api/v3'
 
 const REVALIDATE = 86400 // 24 hours
 
 /**
- * Build a DefiLlama URL.
+ * Build DefiLlama URLs (pro + free).
  *
  * Pro API format (per official @defillama/api SDK):
  *   https://pro-api.llama.fi/{KEY}/api{endpoint}
@@ -24,26 +25,35 @@ const REVALIDATE = 86400 // 24 hours
  * Free API:
  *   https://api.llama.fi{endpoint}
  */
-function llamaUrl(path: string): string {
+function llamaProUrl(path: string): string | null {
   const key = process.env.DEFILLAMA_API_KEY
-  if (key) {
-    // Pro API: key is a path segment, followed by /api namespace, then endpoint
-    return `${DEFILLAMA_PRO_BASE}/${key}/api${path}`
-  }
+  if (!key) return null
+  return `${DEFILLAMA_PRO_BASE}/${key}/api${path}`
+}
+
+function llamaFreeUrl(path: string): string {
   return `${DEFILLAMA_FREE_BASE}${path}`
 }
 
-function geckoUrl(path: string): string {
-  const key = process.env.COINGECKO_API_KEY || ''
+function geckoProUrl(path: string): string | null {
+  const key = process.env.COINGECKO_API_KEY
+  if (!key) return null
   const sep = path.includes('?') ? '&' : '?'
-  return `${COINGECKO_BASE}${path}${sep}x_cg_pro_api_key=${key}`
+  return `${COINGECKO_PRO_BASE}${path}${sep}x_cg_pro_api_key=${key}`
+}
+
+function geckoFreeUrl(path: string): string {
+  return `${COINGECKO_FREE_BASE}${path}`
 }
 
 /** Strip API keys from URLs before logging. */
 function redactUrl(url: string): string {
-  const key = process.env.DEFILLAMA_API_KEY
-  if (key) return url.replace(key, '[KEY]')
-  return url
+  const llamaKey = process.env.DEFILLAMA_API_KEY
+  const geckoKey = process.env.COINGECKO_API_KEY
+  let redacted = url
+  if (llamaKey) redacted = redacted.replace(llamaKey, '[KEY]')
+  if (geckoKey) redacted = redacted.replace(geckoKey, '[KEY]')
+  return redacted
 }
 
 async function safeFetch<T>(url: string): Promise<T | null> {
@@ -58,6 +68,23 @@ async function safeFetch<T>(url: string): Promise<T | null> {
     console.error(`Fetch error for ${redactUrl(url)}:`, err)
     return null
   }
+}
+
+/**
+ * Fetch with automatic fallback: try the primary URL first, then the fallback.
+ * This allows pro API → free API degradation so charts still load when the
+ * pro key is missing, expired, or rate-limited.
+ */
+async function safeFetchWithFallback<T>(
+  primaryUrl: string | null,
+  fallbackUrl: string,
+): Promise<T | null> {
+  if (primaryUrl) {
+    const result = await safeFetch<T>(primaryUrl)
+    if (result !== null) return result
+    console.warn(`Pro API failed, falling back to free API: ${redactUrl(fallbackUrl)}`)
+  }
+  return safeFetch<T>(fallbackUrl)
 }
 
 // ── DefiLlama Fetchers ──────────────────────────────────────────────
@@ -75,33 +102,35 @@ interface LlamaProtocolResponse {
 }
 
 export async function getDefiLlamaProtocol(slug: string) {
-  return safeFetch<LlamaProtocolResponse>(llamaUrl(`/protocol/${slug}`))
+  const path = `/protocol/${slug}`
+  return safeFetchWithFallback<LlamaProtocolResponse>(llamaProUrl(path), llamaFreeUrl(path))
 }
 
 export async function getDefiLlamaFees(slug: string) {
-  return safeFetch<DefiLlamaFees>(llamaUrl(`/summary/fees/${slug}?dataType=dailyFees`))
+  const path = `/summary/fees/${slug}?dataType=dailyFees`
+  return safeFetchWithFallback<DefiLlamaFees>(llamaProUrl(path), llamaFreeUrl(path))
 }
 
 export async function getDefiLlamaRevenue(slug: string) {
-  return safeFetch<DefiLlamaRevenue>(llamaUrl(`/summary/fees/${slug}?dataType=dailyRevenue`))
+  const path = `/summary/fees/${slug}?dataType=dailyRevenue`
+  return safeFetchWithFallback<DefiLlamaRevenue>(llamaProUrl(path), llamaFreeUrl(path))
 }
 
 export async function getDefiLlamaTreasury(slug: string) {
-  return safeFetch<{ tvl: number }>(llamaUrl(`/treasury/${slug}`))
+  const path = `/treasury/${slug}`
+  return safeFetchWithFallback<{ tvl: number }>(llamaProUrl(path), llamaFreeUrl(path))
 }
 
 // ── CoinGecko Fetchers ──────────────────────────────────────────────
 
 export async function getCoinGeckoMarketData(geckoId: string) {
-  return safeFetch<CoinGeckoMarketData>(
-    geckoUrl(`/coins/${geckoId}?localization=false&tickers=false&community_data=false&developer_data=false`)
-  )
+  const path = `/coins/${geckoId}?localization=false&tickers=false&community_data=false&developer_data=false`
+  return safeFetchWithFallback<CoinGeckoMarketData>(geckoProUrl(path), geckoFreeUrl(path))
 }
 
 export async function getCoinGeckoMarketChart(geckoId: string) {
-  return safeFetch<CoinGeckoMarketChart>(
-    geckoUrl(`/coins/${geckoId}/market_chart?vs_currency=usd&days=max&interval=daily`)
-  )
+  const path = `/coins/${geckoId}/market_chart?vs_currency=usd&days=max&interval=daily`
+  return safeFetchWithFallback<CoinGeckoMarketChart>(geckoProUrl(path), geckoFreeUrl(path))
 }
 
 // ── TVL helpers ─────────────────────────────────────────────────────
