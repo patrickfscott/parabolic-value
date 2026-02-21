@@ -43,7 +43,13 @@ function geckoProUrl(path: string): string | null {
 }
 
 function geckoFreeUrl(path: string): string {
-  return `${COINGECKO_FREE_BASE}${path}`
+  const key = process.env.COINGECKO_API_KEY
+  const base = `${COINGECKO_FREE_BASE}${path}`
+  if (!key) return base
+  // Pass the key as a demo API key so the free-tier fallback is authenticated.
+  // This also handles the case where the key is a Demo key (not Pro).
+  const sep = path.includes('?') ? '&' : '?'
+  return `${base}${sep}x_cg_demo_api_key=${key}`
 }
 
 /** Strip API keys from URLs before logging. */
