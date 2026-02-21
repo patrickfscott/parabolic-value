@@ -68,7 +68,7 @@ export default function PriceChart({ data, ticker }: PriceChartProps) {
       </div>
       <div className="h-48">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={sampled} margin={{ top: 5, right: 5, left: 0, bottom: 0 }}>
+          <LineChart data={sampled} margin={{ top: 5, right: 5, left: 5, bottom: 0 }}>
             <CartesianGrid
               strokeDasharray="2 2"
               stroke="#ccc"
@@ -84,6 +84,7 @@ export default function PriceChart({ data, ticker }: PriceChartProps) {
             <YAxis
               yAxisId="price"
               orientation="left"
+              domain={['auto', 'auto']}
               tick={{ fontSize: 8, fontFamily: 'IBM Plex Mono' }}
               tickFormatter={formatAxisPrice}
               tickLine={false}
@@ -94,6 +95,7 @@ export default function PriceChart({ data, ticker }: PriceChartProps) {
               <YAxis
                 yAxisId="tvl"
                 orientation="right"
+                domain={['auto', 'auto']}
                 tick={{ fontSize: 8, fontFamily: 'IBM Plex Mono' }}
                 tickFormatter={formatAxisTvl}
                 tickLine={false}
@@ -109,9 +111,11 @@ export default function PriceChart({ data, ticker }: PriceChartProps) {
                 borderRadius: 0,
                 background: '#fff',
               }}
-              formatter={(value: number, name: string) => {
-                if (name === 'price') return [`$${value.toFixed(2)}`, 'Price']
-                if (name === 'tvl') return [formatAxisTvl(value), 'TVL']
+              formatter={(value, name) => {
+                if (value == null) return ['—', name]
+                const num = Number(value)
+                if (name === 'price') return [`$${num.toFixed(2)}`, 'Price']
+                if (name === 'tvl') return [formatAxisTvl(num), 'TVL']
                 return [value, name]
               }}
             />
