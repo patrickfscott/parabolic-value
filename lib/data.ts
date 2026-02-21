@@ -355,24 +355,35 @@ function buildHistoricalTimeline(
   priceHistory: [number, number][],
   tvlHistory: { date: number; tvl: number }[],
 ): HistoricalDataPoint[] {
-  // Use daily price data, merge with TVL
-  const tvlMap = new Map<string, number>()
+  // Merge both data sources by date key so the chart works even when one source is missing.
+  // CoinGecko timestamps are in milliseconds; DefiLlama timestamps are in seconds.
+  const merged = new Map<string, { dateUnix: number; price: number | null; tvl: number | null }>()
+
   for (const point of tvlHistory) {
     const dateKey = new Date(point.date * 1000).toISOString().split('T')[0]
-    tvlMap.set(dateKey, point.tvl)
+    const existing = merged.get(dateKey)
+    if (existing) {
+      existing.tvl = point.tvl
+    } else {
+      merged.set(dateKey, { dateUnix: point.date, price: null, tvl: point.tvl })
+    }
   }
 
-  const points: HistoricalDataPoint[] = []
   for (const [timestamp, price] of priceHistory) {
     const dateKey = new Date(timestamp).toISOString().split('T')[0]
-    points.push({
-      date: Math.floor(timestamp / 1000),
-      price,
-      tvl: tvlMap.get(dateKey) ?? null,
-    })
+    const dateUnix = Math.floor(timestamp / 1000)
+    const existing = merged.get(dateKey)
+    if (existing) {
+      existing.price = price
+      existing.dateUnix = dateUnix
+    } else {
+      merged.set(dateKey, { dateUnix, price, tvl: null })
+    }
   }
 
-  return points
+  return Array.from(merged.values())
+    .map((entry) => ({ date: entry.dateUnix, price: entry.price, tvl: entry.tvl }))
+    .sort((a, b) => a.date - b.date)
 }
 
 function buildAnnualSnapshots(
@@ -382,12 +393,34 @@ function buildAnnualSnapshots(
   revenueChart: [number, number][],
   feeChart: [number, number][],
 ): AnnualSnapshot[] {
-  // Group by year
+  // Collect years from ALL data sources, not just price history.
+  // CoinGecko timestamps (priceHistory, mcapHistory) are in milliseconds.
+  // DefiLlama timestamps (tvlHistory, revenueChart, feeChart) are in seconds.
   const years = new Set<number>()
   const currentYear = new Date().getFullYear()
 
   for (const [ts] of priceHistory) {
     const year = new Date(ts).getFullYear()
+    if (year >= currentYear - 5 && year <= currentYear) years.add(year)
+  }
+
+  for (const [ts] of mcapHistory) {
+    const year = new Date(ts).getFullYear()
+    if (year >= currentYear - 5 && year <= currentYear) years.add(year)
+  }
+
+  for (const point of tvlHistory) {
+    const year = new Date(point.date * 1000).getFullYear()
+    if (year >= currentYear - 5 && year <= currentYear) years.add(year)
+  }
+
+  for (const [ts] of revenueChart) {
+    const year = new Date(ts * 1000).getFullYear()
+    if (year >= currentYear - 5 && year <= currentYear) years.add(year)
+  }
+
+  for (const [ts] of feeChart) {
+    const year = new Date(ts * 1000).getFullYear()
     if (year >= currentYear - 5 && year <= currentYear) years.add(year)
   }
 

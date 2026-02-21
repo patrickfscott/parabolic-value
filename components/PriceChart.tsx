@@ -59,7 +59,17 @@ export default function PriceChart({ data, ticker }: PriceChartProps) {
       tvl: d.tvl,
     }))
 
+  const hasPrice = sampled.some((d) => d.price != null)
   const hasTvl = sampled.some((d) => d.tvl != null)
+
+  if (!hasPrice && !hasTvl) {
+    return (
+      <div className="tearsheet-section">
+        <div className="tearsheet-section-title">Price & TVL History</div>
+        <div className="text-xs text-center py-8">Data unavailable</div>
+      </div>
+    )
+  }
 
   return (
     <div className="tearsheet-section">
@@ -81,20 +91,22 @@ export default function PriceChart({ data, ticker }: PriceChartProps) {
               axisLine={{ stroke: '#000', strokeWidth: 1 }}
               interval={Math.floor(sampled.length / 6)}
             />
-            <YAxis
-              yAxisId="price"
-              orientation="left"
-              domain={['auto', 'auto']}
-              tick={{ fontSize: 8, fontFamily: 'IBM Plex Mono' }}
-              tickFormatter={formatAxisPrice}
-              tickLine={false}
-              axisLine={{ stroke: '#000', strokeWidth: 1 }}
-              width={50}
-            />
+            {hasPrice && (
+              <YAxis
+                yAxisId="price"
+                orientation="left"
+                domain={['auto', 'auto']}
+                tick={{ fontSize: 8, fontFamily: 'IBM Plex Mono' }}
+                tickFormatter={formatAxisPrice}
+                tickLine={false}
+                axisLine={{ stroke: '#000', strokeWidth: 1 }}
+                width={50}
+              />
+            )}
             {hasTvl && (
               <YAxis
                 yAxisId="tvl"
-                orientation="right"
+                orientation={hasPrice ? 'right' : 'left'}
                 domain={['auto', 'auto']}
                 tick={{ fontSize: 8, fontFamily: 'IBM Plex Mono' }}
                 tickFormatter={formatAxisTvl}
@@ -119,16 +131,18 @@ export default function PriceChart({ data, ticker }: PriceChartProps) {
                 return [value, name]
               }}
             />
-            <Line
-              yAxisId="price"
-              type="monotone"
-              dataKey="price"
-              stroke="#000"
-              strokeWidth={1.5}
-              dot={false}
-              connectNulls
-              name="price"
-            />
+            {hasPrice && (
+              <Line
+                yAxisId="price"
+                type="monotone"
+                dataKey="price"
+                stroke="#000"
+                strokeWidth={1.5}
+                dot={false}
+                connectNulls
+                name="price"
+              />
+            )}
             {hasTvl && (
               <Line
                 yAxisId="tvl"
@@ -146,8 +160,8 @@ export default function PriceChart({ data, ticker }: PriceChartProps) {
         </ResponsiveContainer>
       </div>
       <div className="flex justify-center gap-6 mt-1 text-xxs">
-        <span>&#9473; Price (left axis)</span>
-        {hasTvl && <span>- - - TVL (right axis)</span>}
+        {hasPrice && <span>&#9473; Price (left axis)</span>}
+        {hasTvl && <span>- - - TVL ({hasPrice ? 'right' : 'left'} axis)</span>}
       </div>
     </div>
   )
