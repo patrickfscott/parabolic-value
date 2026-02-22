@@ -159,7 +159,11 @@ export async function getCoinGeckoMarketChart(geckoId: string) {
 async function getDefiLlamaHistoricalPrices(
   geckoId: string,
 ): Promise<[number, number][]> {
-  const url = `${DEFILLAMA_COINS_BASE}/chart/coingecko:${geckoId}`
+  // Request ~6 years of daily price data so the annual history table is fully populated
+  // even when CoinGecko is rate-limited or caps history to 365 days (Demo plan).
+  const sixYearsAgoMs = new Date(new Date().getFullYear() - 6, 0, 1).getTime()
+  const startUnix = Math.floor(sixYearsAgoMs / 1000)
+  const url = `${DEFILLAMA_COINS_BASE}/chart/coingecko:${geckoId}?start=${startUnix}&span=24`
   const data = await safeFetch<DefiLlamaCoinsChartResponse>(url)
   const coinKey = `coingecko:${geckoId}`
   const prices = data?.coins?.[coinKey]?.prices
@@ -230,8 +234,10 @@ export async function getProtocolData(config: ProtocolConfig): Promise<{
   historicalPrices: HistoricalDataPoint[]
   annualSnapshots: AnnualSnapshot[]
 }> {
-  // Fetch all data in parallel
-  const [llamaProtocol, llamaFees, llamaRevenue, llamaTreasury, geckoMarket, geckoChart] =
+  // Fetch all data in parallel — including DefiLlama prices as a primary source,
+  // not just a fallback. This ensures 6 years of price history regardless of
+  // CoinGecko availability or plan limits (Demo plan caps history to 365 days).
+  const [llamaProtocol, llamaFees, llamaRevenue, llamaTreasury, geckoMarket, geckoChart, llamaPrices] =
     await Promise.all([
       getDefiLlamaProtocol(config.slug),
       getDefiLlamaFees(config.slug),
@@ -239,6 +245,7 @@ export async function getProtocolData(config: ProtocolConfig): Promise<{
       getDefiLlamaTreasury(config.slug),
       getCoinGeckoMarketData(config.geckoId),
       getCoinGeckoMarketChart(config.geckoId),
+      getDefiLlamaHistoricalPrices(config.geckoId),
     ])
 
   // ── Current Metrics ─────────────────────────────────────────────
@@ -332,22 +339,38 @@ export async function getProtocolData(config: ProtocolConfig): Promise<{
   // ── Historical Data Points ──────────────────────────────────────
 
   const tvlHistory = extractTVLHistory(llamaProtocol)
-  let priceHistory: [number, number][] = geckoChart?.prices ?? []
 
-  // Fallback: if CoinGecko chart failed, try DefiLlama coins API for price history
+  // Merge price histories: DefiLlama provides full 6-year range (primary),
+  // CoinGecko provides higher-quality recent data (overlay).
+  const geckoPrices: [number, number][] = geckoChart?.prices ?? []
+  const priceHistory = mergePriceHistories(geckoPrices, llamaPrices)
+
   if (priceHistory.length === 0) {
-    console.warn(`CoinGecko chart empty for ${config.geckoId}, trying DefiLlama coins API`)
-    priceHistory = await getDefiLlamaHistoricalPrices(config.geckoId)
+    console.warn(`No price history available for ${config.geckoId} from any source`)
   }
 
-  // Build merged timeline
+  // Build market cap history with estimation fallback.
+  // Priority: CoinGecko real mcaps > estimated mcaps (price * circulating supply) > empty.
+  const geckoMcaps: [number, number][] = geckoChart?.market_caps ?? []
+  let mcapHistory: [number, number][]
+
+  if (circulatingSupply != null && circulatingSupply > 0) {
+    const estimatedMcaps = estimateMarketCaps(priceHistory, circulatingSupply)
+    mcapHistory = geckoMcaps.length > 0
+      ? mergeMarketCapHistories(geckoMcaps, estimatedMcaps)
+      : estimatedMcaps
+  } else {
+    mcapHistory = geckoMcaps
+  }
+
+  // Build merged timeline for the price/TVL chart
   const historicalPrices = buildHistoricalTimeline(priceHistory, tvlHistory)
 
   // ── Annual Snapshots ────────────────────────────────────────────
 
   const annualSnapshots = buildAnnualSnapshots(
     priceHistory,
-    geckoChart?.market_caps ?? [],
+    mcapHistory,
     tvlHistory,
     llamaRevenue?.totalDataChart ?? [],
     llamaFees?.totalDataChart ?? [],
@@ -416,6 +439,61 @@ function buildHistoricalTimeline(
   return Array.from(merged.values())
     .map((entry) => ({ date: entry.dateUnix, price: entry.price, tvl: entry.tvl }))
     .sort((a, b) => a.date - b.date)
+}
+
+/**
+ * Merge CoinGecko and DefiLlama price histories into a single deduplicated timeline.
+ * Both inputs are in [timestamp_ms, price] format.
+ * CoinGecko data takes precedence for overlapping dates (higher quality).
+ */
+function mergePriceHistories(
+  geckoPrices: [number, number][],
+  llamaPrices: [number, number][],
+): [number, number][] {
+  const merged = new Map<string, [number, number]>()
+  for (const entry of llamaPrices) {
+    const dateKey = new Date(entry[0]).toISOString().split('T')[0]
+    merged.set(dateKey, entry)
+  }
+  for (const entry of geckoPrices) {
+    const dateKey = new Date(entry[0]).toISOString().split('T')[0]
+    merged.set(dateKey, entry)
+  }
+  return Array.from(merged.values()).sort((a, b) => a[0] - b[0])
+}
+
+/**
+ * Estimate historical market caps from price history and current circulating supply.
+ * This assumes today's supply applied at all historical dates — an acceptable
+ * approximation vs. showing "N/A" for all years.
+ */
+function estimateMarketCaps(
+  priceHistory: [number, number][],
+  circulatingSupply: number,
+): [number, number][] {
+  return priceHistory.map(
+    ([ts, price]) => [ts, price * circulatingSupply] as [number, number],
+  )
+}
+
+/**
+ * Merge real CoinGecko market cap snapshots with estimated market caps.
+ * CoinGecko data takes precedence for overlapping dates.
+ */
+function mergeMarketCapHistories(
+  geckoMcaps: [number, number][],
+  estimatedMcaps: [number, number][],
+): [number, number][] {
+  const merged = new Map<string, [number, number]>()
+  for (const entry of estimatedMcaps) {
+    const dateKey = new Date(entry[0]).toISOString().split('T')[0]
+    merged.set(dateKey, entry)
+  }
+  for (const entry of geckoMcaps) {
+    const dateKey = new Date(entry[0]).toISOString().split('T')[0]
+    merged.set(dateKey, entry)
+  }
+  return Array.from(merged.values()).sort((a, b) => a[0] - b[0])
 }
 
 function buildAnnualSnapshots(
