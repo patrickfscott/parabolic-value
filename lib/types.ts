@@ -76,12 +76,6 @@ export interface CoinGeckoMarketData {
   }
 }
 
-export interface CoinGeckoMarketChart {
-  prices: [number, number][]
-  market_caps: [number, number][]
-  total_volumes: [number, number][]
-}
-
 // ── Processed / Computed Types ──────────────────────────────────────
 
 export interface ProtocolMetrics {
