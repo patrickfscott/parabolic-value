@@ -150,16 +150,17 @@ export async function getCoinGeckoMarketData(geckoId: string) {
 async function getDefiLlamaHistoricalPrices(
   geckoId: string,
 ): Promise<[number, number][]> {
-  // DefiLlama provides the full price history (6+ years) without the 2-year cap
-  // that CoinGecko imposes. Used as the sole source for the historical price chart.
+  // DefiLlama coins API provides the full price history (6+ years) without the
+  // 2-year cap that CoinGecko imposes. The `period` parameter controls the time
+  // interval between data points (daily). Without a `span` limit, all available
+  // daily data points from `start` to now are returned.
   const sixYearsAgoMs = new Date(new Date().getFullYear() - 6, 0, 1).getTime()
   const startUnix = Math.floor(sixYearsAgoMs / 1000)
-  const url = `${DEFILLAMA_COINS_BASE}/chart/coingecko:${geckoId}?start=${startUnix}&span=24`
+  const url = `${DEFILLAMA_COINS_BASE}/chart/coingecko:${geckoId}?start=${startUnix}&period=1d`
   const data = await safeFetch<DefiLlamaCoinsChartResponse>(url)
   const coinKey = `coingecko:${geckoId}`
   const prices = data?.coins?.[coinKey]?.prices
   if (!prices || prices.length === 0) return []
-  // Convert to CoinGecko-compatible format: [timestamp_ms, price]
   return prices.map((p) => [p.timestamp * 1000, p.price] as [number, number])
 }
 
