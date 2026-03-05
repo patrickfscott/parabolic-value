@@ -145,7 +145,26 @@ export async function getCoinGeckoMarketData(geckoId: string) {
   return safeFetchWithFallback<CoinGeckoMarketData>(geckoProUrl(path), geckoFreeUrl(path))
 }
 
-// ── DefiLlama Coins (Historical Prices) ───────────────────────────
+// ── DefiLlama Coins (Historical & Current Prices) ─────────────────
+
+interface DefiLlamaCurrentPriceResponse {
+  coins: Record<
+    string,
+    {
+      price: number
+      symbol: string
+      timestamp: number
+      confidence: number
+    }
+  >
+}
+
+async function getDefiLlamaCurrentPrice(geckoId: string): Promise<number | null> {
+  const coinKey = `coingecko:${geckoId}`
+  const url = `${DEFILLAMA_COINS_BASE}/prices/current/${coinKey}`
+  const data = await safeFetch<DefiLlamaCurrentPriceResponse>(url)
+  return data?.coins?.[coinKey]?.price ?? null
+}
 
 async function getDefiLlamaHistoricalPrices(
   geckoId: string,
@@ -162,6 +181,45 @@ async function getDefiLlamaHistoricalPrices(
   const prices = data?.coins?.[coinKey]?.prices
   if (!prices || prices.length === 0) return []
   return prices.map((p) => [p.timestamp * 1000, p.price] as [number, number])
+}
+
+/** Compute ATH/ATL and their dates from historical price data. */
+function computeAthAtl(priceHistory: [number, number][]): {
+  ath: number | null
+  athDate: string | null
+  atl: number | null
+  atlDate: string | null
+} {
+  if (priceHistory.length === 0) return { ath: null, athDate: null, atl: null, atlDate: null }
+  let ath = -Infinity
+  let athTs = 0
+  let atl = Infinity
+  let atlTs = 0
+  for (const [ts, price] of priceHistory) {
+    if (price > ath) { ath = price; athTs = ts }
+    if (price < atl) { atl = price; atlTs = ts }
+  }
+  return {
+    ath: isFinite(ath) ? ath : null,
+    athDate: athTs ? new Date(athTs).toISOString() : null,
+    atl: isFinite(atl) ? atl : null,
+    atlDate: atlTs ? new Date(atlTs).toISOString() : null,
+  }
+}
+
+/** Compute price change percentage over the last N days from historical data. */
+function computePriceChange(priceHistory: [number, number][], days: number): number | null {
+  if (priceHistory.length < 2) return null
+  const now = priceHistory[priceHistory.length - 1]
+  const targetTs = now[0] - days * 86400 * 1000
+  let closest = priceHistory[0]
+  for (const point of priceHistory) {
+    if (Math.abs(point[0] - targetTs) < Math.abs(closest[0] - targetTs)) {
+      closest = point
+    }
+  }
+  if (closest[1] === 0) return null
+  return ((now[1] - closest[1]) / closest[1]) * 100
 }
 
 // ── TVL helpers ─────────────────────────────────────────────────────
@@ -226,35 +284,39 @@ export async function getProtocolData(config: ProtocolConfig): Promise<{
   historicalPrices: HistoricalDataPoint[]
   annualSnapshots: AnnualSnapshot[]
 }> {
-  // Fetch all data in parallel. DefiLlama provides the full price history
-  // (6+ years of daily data) — CoinGecko market_chart is not used because
-  // it caps history to ~2 years.
-  const [llamaProtocol, llamaFees, llamaRevenue, llamaTreasury, geckoMarket, llamaPrices] =
+  // Fetch all data in parallel. DefiLlama is the exclusive source for all
+  // price data (current + historical). CoinGecko is only used for supply
+  // and volume data that DefiLlama does not provide.
+  const [llamaProtocol, llamaFees, llamaRevenue, llamaTreasury, geckoMarket, llamaCurrentPrice, llamaPrices] =
     await Promise.all([
       getDefiLlamaProtocol(config.slug),
       getDefiLlamaFees(config.slug),
       getDefiLlamaRevenue(config.slug),
       getDefiLlamaTreasury(config.slug),
       getCoinGeckoMarketData(config.geckoId),
+      getDefiLlamaCurrentPrice(config.geckoId),
       getDefiLlamaHistoricalPrices(config.geckoId),
     ])
 
   // ── Current Metrics ─────────────────────────────────────────────
 
-  const price = geckoMarket?.market_data?.current_price?.usd ?? null
-  const marketCap = geckoMarket?.market_data?.market_cap?.usd ?? null
-  const fdv = geckoMarket?.market_data?.fully_diluted_valuation?.usd ?? null
-  const volume24h = geckoMarket?.market_data?.total_volume?.usd ?? null
+  // Price exclusively from DefiLlama
+  const price = llamaCurrentPrice
+  // Supply & volume from CoinGecko (DefiLlama doesn't provide these)
   const circulatingSupply = geckoMarket?.market_data?.circulating_supply ?? null
   const totalSupply = geckoMarket?.market_data?.total_supply ?? null
+  const volume24h = geckoMarket?.market_data?.total_volume?.usd ?? null
+  // Compute market cap & FDV from DefiLlama price × CoinGecko supply
+  const marketCap =
+    price != null && circulatingSupply != null ? price * circulatingSupply : null
+  const fdv =
+    price != null && totalSupply != null ? price * totalSupply : null
   const percentCirculating =
     circulatingSupply != null && totalSupply != null && totalSupply > 0
       ? (circulatingSupply / totalSupply) * 100
       : null
-  const ath = geckoMarket?.market_data?.ath?.usd ?? null
-  const athDate = geckoMarket?.market_data?.ath_date?.usd ?? null
-  const atl = geckoMarket?.market_data?.atl?.usd ?? null
-  const atlDate = geckoMarket?.market_data?.atl_date?.usd ?? null
+  // ATH/ATL computed from DefiLlama historical price data
+  const { ath, athDate, atl, atlDate } = computeAthAtl(llamaPrices)
   const distanceFromATH =
     price != null && ath != null && ath > 0 ? ((price - ath) / ath) * 100 : null
 
@@ -292,10 +354,8 @@ export async function getProtocolData(config: ProtocolConfig): Promise<{
       ? (annualizedFees / tvl) * 100
       : null
 
-  // Momentum metrics — compound 30d change to approximate 90d
-  const priceChange90d = geckoMarket?.market_data?.price_change_percentage_30d != null
-    ? ((Math.pow(1 + geckoMarket.market_data.price_change_percentage_30d / 100, 3) - 1) * 100)
-    : null
+  // Momentum metrics — compute directly from DefiLlama historical prices
+  const priceChange90d = computePriceChange(llamaPrices, 90)
   const tvlChange90d = computeTvlChange90d(extractTVLHistory(llamaProtocol))
   const revenueChange90d = computeRevenueChange90d(llamaRevenue)
 
