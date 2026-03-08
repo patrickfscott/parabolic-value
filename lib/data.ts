@@ -35,6 +35,25 @@ function llamaFreeUrl(path: string): string {
   return `${DEFILLAMA_FREE_BASE}${path}`
 }
 
+/**
+ * Build DefiLlama Coins API URLs (pro + free).
+ *
+ * Pro API format for coins endpoints:
+ *   https://pro-api.llama.fi/{KEY}/coins{path}
+ *
+ * Free API:
+ *   https://coins.llama.fi{path}
+ */
+function llamaCoinsProUrl(path: string): string | null {
+  const key = process.env.DEFILLAMA_API_KEY
+  if (!key) return null
+  return `${DEFILLAMA_PRO_BASE}/${key}/coins${path}`
+}
+
+function llamaCoinsFreeUrl(path: string): string {
+  return `${DEFILLAMA_COINS_BASE}${path}`
+}
+
 function geckoProUrl(path: string): string | null {
   const key = process.env.COINGECKO_API_KEY
   if (!key) return null
@@ -161,8 +180,11 @@ interface DefiLlamaCurrentPriceResponse {
 
 async function getDefiLlamaCurrentPrice(geckoId: string): Promise<number | null> {
   const coinKey = `coingecko:${geckoId}`
-  const url = `${DEFILLAMA_COINS_BASE}/prices/current/${coinKey}`
-  const data = await safeFetch<DefiLlamaCurrentPriceResponse>(url)
+  const path = `/prices/current/${coinKey}`
+  const data = await safeFetchWithFallback<DefiLlamaCurrentPriceResponse>(
+    llamaCoinsProUrl(path),
+    llamaCoinsFreeUrl(path),
+  )
   return data?.coins?.[coinKey]?.price ?? null
 }
 
@@ -175,8 +197,11 @@ async function getDefiLlamaHistoricalPrices(
   // daily data points from `start` to now are returned.
   const sixYearsAgoMs = new Date(new Date().getFullYear() - 6, 0, 1).getTime()
   const startUnix = Math.floor(sixYearsAgoMs / 1000)
-  const url = `${DEFILLAMA_COINS_BASE}/chart/coingecko:${geckoId}?start=${startUnix}&period=1d`
-  const data = await safeFetch<DefiLlamaCoinsChartResponse>(url)
+  const path = `/chart/coingecko:${geckoId}?start=${startUnix}&period=1d`
+  const data = await safeFetchWithFallback<DefiLlamaCoinsChartResponse>(
+    llamaCoinsProUrl(path),
+    llamaCoinsFreeUrl(path),
+  )
   const coinKey = `coingecko:${geckoId}`
   const prices = data?.coins?.[coinKey]?.prices
   if (!prices || prices.length === 0) return []
